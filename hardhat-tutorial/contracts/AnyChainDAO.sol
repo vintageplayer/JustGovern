@@ -33,7 +33,12 @@ contract AnyChainDAO is Ownable {
 
     // Create a mapping of ID to Proposal
     mapping(uint256 => Proposal) public proposals;
-    
+
     // Number of proposals that have been created
     uint256 public numProposals;
+
+    // Create a payable constructor to store treasuryfunds and use it for executing proposals
+    // The payable allows this constructor to accept an ETH deposit when it is being deployed
+    constructor() payable {}
+
 }
