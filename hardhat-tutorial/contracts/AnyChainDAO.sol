@@ -34,6 +34,8 @@ contract AnyChainDAO is Ownable {
         VoteCount votes;
         // executed - whether or not this proposal has been executed yet. Cannot be executed before the deadline has been exceeded.
         bool executed;
+        // proposalPassed - whether the voting outcome was in favor of the proposal or not
+        bool proposalPassed;
         // voters - a mapping of addresses to booleans indicating whether the address has already been used to cast a vote or not
         mapping(address => bool) voters;
     }
@@ -117,5 +119,22 @@ contract AnyChainDAO is Ownable {
         } else {
             proposal.votes.abstain += 1;
         }
+    }
+
+    /// @dev executeProposal allows any voting right holder to execute a proposal after it's deadline has been exceeded
+    /// @param proposalIndex - the index of the proposal to execute in the proposals array
+    function executeProposal(uint256 proposalIndex)
+        external
+        votingRightHolderOnly
+        readyToExecuteOnly(proposalIndex)
+    {
+        Proposal storage proposal = proposals[proposalIndex];
+
+        // If the proposal has more YES votes than NO votes
+        // mark the outcome has success
+        if (proposal.votes.inFavor > proposal.votes.against) {
+            proposal.proposalPassed = true;
+        }
+        proposal.executed = true;
     }
 }
