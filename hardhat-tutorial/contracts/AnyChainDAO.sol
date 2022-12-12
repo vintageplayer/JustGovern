@@ -65,6 +65,21 @@ contract AnyChainDAO is Ownable {
         _;
     }
 
+    // Create a modifier which only allows a function to be
+    // called if the given proposals' deadline HAS been exceeded
+    // and if the proposal has not yet been executed
+    modifier readyToExecuteOnly(uint256 proposalIndex) {
+        require(
+            proposals[proposalIndex].deadline <= block.timestamp,
+            "DEADLINE_NOT_EXCEEDED"
+        );
+        require(
+            proposals[proposalIndex].executed == false,
+            "PROPOSAL_ALREADY_EXECUTED"
+        );
+        _;
+    }
+
     /// @dev createProposal allows a AnyChainDAO voting rights holder to create a new proposal in the DAO
     /// @param proposalTitle - The proposal to execute based on voting outcome
     /// @return Returns the proposal index for the newly created proposal
