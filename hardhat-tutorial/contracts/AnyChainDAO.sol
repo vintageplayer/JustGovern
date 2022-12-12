@@ -48,6 +48,16 @@ contract AnyChainDAO is Ownable {
         _;
     }
 
+    // Create a modifier which only allows a function to be
+    // called if the given proposal's deadline has not been exceeded yet
+    modifier activeProposalOnly(uint256 proposalIndex) {
+        require(
+            proposals[proposalIndex].deadline > block.timestamp,
+            "DEADLINE_EXCEEDED"
+        );
+        _;
+    }
+    
     /// @dev createProposal allows a AnyChainDAO voting rights holder to create a new proposal in the DAO
     /// @param proposalTitle - The proposal to execute based on voting outcome
     /// @return Returns the proposal index for the newly created proposal
@@ -64,5 +74,5 @@ contract AnyChainDAO is Ownable {
         numProposals++;
 
         return numProposals - 1;
-    }
+    }    
 }
