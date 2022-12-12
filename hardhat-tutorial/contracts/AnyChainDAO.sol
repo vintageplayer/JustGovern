@@ -47,4 +47,22 @@ contract AnyChainDAO is Ownable {
         // Check for address having voting rights
         _;
     }
+
+    /// @dev createProposal allows a AnyChainDAO voting rights holder to create a new proposal in the DAO
+    /// @param proposalTitle - The proposal to execute based on voting outcome
+    /// @return Returns the proposal index for the newly created proposal
+    function createProposal(string calldata proposalTitle)
+        external
+        votingRightHolderOnly
+        returns (uint256)
+    {
+        Proposal storage proposal = proposals[numProposals];
+        proposal.proposalTitle = proposalTitle;
+        // Set the proposal's voting deadline to be (current time + 10 minutes)
+        proposal.deadline = block.timestamp + 10 minutes;
+
+        numProposals++;
+
+        return numProposals - 1;
+    }
 }
