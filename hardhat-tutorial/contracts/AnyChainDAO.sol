@@ -34,8 +34,8 @@ contract AnyChainDAO is Ownable {
         VoteCount votes;
         // executed - whether or not this proposal has been executed yet. Cannot be executed before the deadline has been exceeded.
         bool executed;
-        // voters - a mapping of CryptoDevsNFT tokenIDs to booleans indicating whether that NFT has already been used to cast a vote or not
-        mapping(uint256 => bool) voters;
+        // voters - a mapping of addresses to booleans indicating whether the address has already been used to cast a vote or not
+        mapping(address => bool) voters;
     }
 
     // Create a mapping of ID to Proposal
@@ -81,5 +81,26 @@ contract AnyChainDAO is Ownable {
         numProposals++;
 
         return numProposals - 1;
-    }    
+    }
+
+    /// @dev voteOnProposal allows a voting right holder to cast their vote on an active proposal
+    /// @param proposalIndex - the index of the proposal to vote on in the proposals array
+    /// @param vote - the type of vote they want to cast
+    function voteOnProposal(uint256 proposalIndex, Vote vote)
+        external
+        votingRightHolderOnly
+        activeProposalOnly(proposalIndex)
+    {
+        require(proposals[proposalIndex].voters[msg.sender] == false, "ALREADY_VOTED");
+        
+        Proposal storage proposal = proposals[proposalIndex];
+
+        if (vote == Vote.YES) {
+            proposal.votes.inFavor += 1;
+        } else if (vote == Vote.NO) {
+            proposal.votes.against += 1;
+        } else {
+            proposal.votes.abstain += 1;
+        }
+    }
 }
