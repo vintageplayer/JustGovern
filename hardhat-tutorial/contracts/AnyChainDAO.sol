@@ -41,4 +41,10 @@ contract AnyChainDAO is Ownable {
     // The payable allows this constructor to accept an ETH deposit when it is being deployed
     constructor() payable {}
 
+    // Create a modifier which only allows a function to be
+    // called by someone who has voting power through tokens or delegation
+    modifier votingRightHolderOnly() {
+        // Check for address having voting rights
+        _;
+    }
 }
