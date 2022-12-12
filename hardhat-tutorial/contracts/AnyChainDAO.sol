@@ -6,9 +6,16 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 // We will add the Interfaces here
 
 contract AnyChainDAO is Ownable {
+
+    // Create an enum named Vote containing possible options for a vote
+    enum Vote {
+        YES, // YES = 0
+        NO, // NO = 1
+        ABSTAIN // ABSTAIN = 2
+    }
     
     // Create a struct named votes to store counts for a proposal
-    struct Vote {
+    struct VoteCount {
         // inFavor - number of yes votes for this proposal
         uint256 inFavor;
         // against - number of no votes for this proposal
@@ -24,7 +31,7 @@ contract AnyChainDAO is Ownable {
         // deadline - the UNIX timestamp until which this proposal is active. Proposal can be executed after the deadline has been exceeded.
         uint256 deadline;
         // votes - Count of different votes cast on-chain for the proposal
-        Vote votes;
+        VoteCount votes;
         // executed - whether or not this proposal has been executed yet. Cannot be executed before the deadline has been exceeded.
         bool executed;
         // voters - a mapping of CryptoDevsNFT tokenIDs to booleans indicating whether that NFT has already been used to cast a vote or not
@@ -57,7 +64,7 @@ contract AnyChainDAO is Ownable {
         );
         _;
     }
-    
+
     /// @dev createProposal allows a AnyChainDAO voting rights holder to create a new proposal in the DAO
     /// @param proposalTitle - The proposal to execute based on voting outcome
     /// @return Returns the proposal index for the newly created proposal
