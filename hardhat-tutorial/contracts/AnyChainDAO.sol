@@ -30,4 +30,10 @@ contract AnyChainDAO is Ownable {
         // voters - a mapping of CryptoDevsNFT tokenIDs to booleans indicating whether that NFT has already been used to cast a vote or not
         mapping(uint256 => bool) voters;
     }
+
+    // Create a mapping of ID to Proposal
+    mapping(uint256 => Proposal) public proposals;
+    
+    // Number of proposals that have been created
+    uint256 public numProposals;
 }
