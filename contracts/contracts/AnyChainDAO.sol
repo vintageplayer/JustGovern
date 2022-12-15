@@ -2,16 +2,31 @@
 pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./lzApp/NonblockingLzApp.sol";
+import "./interfaces/ILayerZeroReceiver.sol";
 
 // We will add the Interfaces here
 
-contract AnyChainDAO is Ownable {
+contract AnyChainDAO is Ownable, ILayerZeroReceiver {
+    
+    uint32 nonce = 0;
+    uint16 sideChainId;
+    add
+    mapping(uint16 => bytes32) _daoContracts;
+    uint32 siblingCount;
 
     // Create an enum named Vote containing possible options for a vote
     enum Vote {
         YES, // YES = 0
         NO, // NO = 1
         ABSTAIN // ABSTAIN = 2
+    }
+
+    enum MessageOperation {
+        NEW_PROPOSAL,
+        VOTING_ENDED,
+        SHARING_VOTES,
+        PROPOSAL_RESULT
     }
     
     // Create a struct named votes to store counts for a proposal
@@ -32,6 +47,10 @@ contract AnyChainDAO is Ownable {
         uint256 deadline;
         // votes - Count of different votes cast on-chain for the proposal
         VoteCount votes;
+        // votingEnded - whether or not the voting period has ended and chains have been notified
+        bool votingEnded;
+        // siblingVoteReceivedCount - number of chains from which final vote counts have been added
+        uint32 siblingVoteReceivedCount;
         // executed - whether or not this proposal has been executed yet. Cannot be executed before the deadline has been exceeded.
         bool executed;
         // proposalPassed - whether the voting outcome was in favor of the proposal or not
@@ -48,7 +67,7 @@ contract AnyChainDAO is Ownable {
 
     // Create a payable constructor to store treasuryfunds and use it for executing proposals
     // The payable allows this constructor to accept an ETH deposit when it is being deployed
-    constructor() payable {}
+    constructor(address _lzEndpoint) NonblockingLzApp(_lzEndpoint) {}
 
     // Create a modifier which only allows a function to be
     // called by someone who has voting power through tokens or delegation
@@ -69,17 +88,109 @@ contract AnyChainDAO is Ownable {
 
     // Create a modifier which only allows a function to be
     // called if the given proposals' deadline HAS been exceeded
-    // and if the proposal has not yet been executed
-    modifier readyToExecuteOnly(uint256 proposalIndex) {
+    // and the voting reconcialitation is yet to start
+    modifier readyForVotingResult(uint256 proposalIndex) {
         require(
             proposals[proposalIndex].deadline <= block.timestamp,
             "DEADLINE_NOT_EXCEEDED"
+        );
+        require(
+            proposals[proposalIndex].votingEnded == false,
+            "PROPOSAL_VOTE_COUNT_ALREADY_STARTED"
+        );
+        _;
+    }
+
+    // Create a modifier which only allows a function to be
+    // called if the given proposals' voting results are available
+    // and if the proposal has not yet been executed
+    modifier readyToExecuteOnly(uint256 proposalIndex) {
+        require(
+            proposals[proposalIndex].votingEnded = true,
+            "VOTING_AGGREGATION_IS_YET_START"
+        );
+        require(
+            proposals[proposalIndex].siblingVoteReceivedCount == siblingCount,
+            "YET_TO_RECEIVE_RESULTS_FROM_ALL_CHAINS"
         );
         require(
             proposals[proposalIndex].executed == false,
             "PROPOSAL_ALREADY_EXECUTED"
         );
         _;
+    }
+
+    // Registers it's DAO contracts on other chains as the only ones that can send this instance messages
+    function registerDaoContract(uint16 chainId) public onlyOwner {
+        sideChainId = chainId;
+        _daoContracts[chainId] = daoContractAddress;
+        siblingCount += 1;
+    }
+
+    // pings the destination chain, along with the current number of pings sent
+    function sendMessage(
+        MessageOperation operation, uint256 proposalIndex
+    ) public payable whenNotPaused {
+        require(address(this).balance > 0, "the balance of this contract is 0. pls send gas for message fees");
+
+        // encode the payload with the number of pings
+        bytes memory payload = createMessagePayload(operation, proposalIndex);
+
+        // use adapterParams v1 to specify more gas for the destination
+        uint16 version = 1;
+        uint gasForDestinationLzReceive = 350000;
+        bytes memory adapterParams = abi.encodePacked(version, gasForDestinationLzReceive);
+
+        // send LayerZero message
+        _lzSend( // {value: messageFee} will be paid out of this contract!
+            sideChainId, // destination chainId
+            payload, // abi.encode()'ed bytes
+            payable(this), // (msg.sender will be this contract) refund address (LayerZero will refund any extra gas back to caller of send()
+            address(0x0), // future param, unused for this example
+            adapterParams, // v1 adapterParams, specify custom destination gas qty
+            msg.value
+        );
+    }
+
+    /// @dev createMessagePayload converts the operation type and proposal state to bytes to emit to the bridge contract
+    function createMessagePayload(MessageOperation operation, uint256 proposalIndex)
+    internal view returns (bytes memory) {
+        return abi.encode(operation,
+            proposalIndex,
+            proposals[proposalIndex].proposalTitle,
+            proposals[proposalIndex].deadline,
+            proposals[proposalIndex].votes,
+            proposals[proposalIndex].executed,
+            proposals[proposalIndex].proposalPassed
+            );
+    }
+
+    /// @dev processMessagePayload processes messages received from other chain
+    function processMessagePayload(bytes memory data)
+    internal {
+        MessageOperation operation;
+        uint256 proposalIndex;
+        string memory proposalTitle;
+        uint256 deadline;
+        VoteCount memory votes;
+        bool executed;
+        bool proposalPassed;
+        (operation, proposalIndex, proposalTitle, deadline, votes, executed, proposalPassed) = abi.decode(data, (MessageOperation, uint256, string, uint256, VoteCount, bool, bool));
+
+        if (operation == MessageOperation.SHARING_VOTES) {
+            proposals[proposalIndex].votes.inFavor += votes.inFavor;
+            proposals[proposalIndex].votes.against += votes.against;
+            proposals[proposalIndex].votes.abstain += votes.abstain;
+            proposals[proposalIndex].siblingVoteReceivedCount += 1;
+        }
+    }
+
+    function lzReceive(uint16 _srcChainId, bytes memory _srcAddress, uint _nonce, bytes memory _payload) internal override {
+        require(msg.sender == address(endpoint));
+        require(keccak256(_srcAddress) == keccak256(_daoContracts[_srcChainId], "Invalid Emitter Address!");
+            
+        //Process the Message
+        processMessagePayload(_payload);
     }
 
     /// @dev createProposal allows a AnyChainDAO voting rights holder to create a new proposal in the DAO
@@ -94,7 +205,7 @@ contract AnyChainDAO is Ownable {
         proposal.proposalTitle = proposalTitle;
         // Set the proposal's voting deadline to be (current time + 10 minutes)
         proposal.deadline = block.timestamp + 10 minutes;
-
+        sendMessage(MessageOperation.NEW_PROPOSAL, numProposals);
         numProposals++;
 
         return numProposals - 1;
@@ -121,6 +232,15 @@ contract AnyChainDAO is Ownable {
         }
     }
 
+    function endVoting(uint256 proposalIndex)
+        external
+        votingRightHolderOnly
+        //modified Needed here to
+    {
+        proposals[proposalIndex].votingEnded = true;
+        sendMessage(MessageOperation.VOTING_ENDED, proposalIndex);
+    }
+
     /// @dev executeProposal allows any voting right holder to execute a proposal after it's deadline has been exceeded
     /// @param proposalIndex - the index of the proposal to execute in the proposals array
     function executeProposal(uint256 proposalIndex)
@@ -136,6 +256,7 @@ contract AnyChainDAO is Ownable {
             proposal.proposalPassed = true;
         }
         proposal.executed = true;
+        sendMessage(MessageOperation.PROPOSAL_RESULT, proposalIndex);
     }
 
     /// @dev withdrawEther allows the contract owner (deployer) to withdraw the ETH from the contract
