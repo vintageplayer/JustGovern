@@ -2,15 +2,16 @@
 pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "./lzApp/NonblockingLzApp.sol";
 import "./interfaces/ILayerZeroReceiver.sol";
 
-contract AnyChainDAO is Ownable, ILayerZeroReceiver {
+contract SideChainDAO is Ownable, ILayerZeroReceiver {
     
     uint32 nonce = 0;
-    uint16 sideChainId;
+    uint16 mainChainId;
     mapping(uint16 => bytes32) _daoContracts;
-    uint32 siblingCount;
+    mapping(bytes32 => bool) _completedMessages;
 
     // Create an enum named Vote containing possible options for a vote
     enum Vote {
@@ -46,8 +47,6 @@ contract AnyChainDAO is Ownable, ILayerZeroReceiver {
         VoteCount votes;
         // votingEnded - whether or not the voting period has ended and chains have been notified
         bool votingEnded;
-        // siblingVoteReceivedCount - number of chains from which final vote counts have been added
-        uint32 siblingVoteReceivedCount;
         // executed - whether or not this proposal has been executed yet. Cannot be executed before the deadline has been exceeded.
         bool executed;
         // proposalPassed - whether the voting outcome was in favor of the proposal or not
@@ -59,11 +58,6 @@ contract AnyChainDAO is Ownable, ILayerZeroReceiver {
     // Create a mapping of ID to Proposal
     mapping(uint256 => Proposal) public proposals;
 
-    // Number of proposals that have been created
-    uint256 public numProposals;
-
-    // Create a payable constructor to store treasuryfunds and use it for executing proposals
-    // The payable allows this constructor to accept an ETH deposit when it is being deployed
     constructor(address _lzEndpoint) NonblockingLzApp(_lzEndpoint) {}
 
     // Create a modifier which only allows a function to be
@@ -83,45 +77,10 @@ contract AnyChainDAO is Ownable, ILayerZeroReceiver {
         _;
     }
 
-    // Create a modifier which only allows a function to be
-    // called if the given proposals' deadline HAS been exceeded
-    // and the voting reconcialitation is yet to start
-    modifier readyForVotingResult(uint256 proposalIndex) {
-        require(
-            proposals[proposalIndex].deadline <= block.timestamp,
-            "DEADLINE_NOT_EXCEEDED"
-        );
-        require(
-            proposals[proposalIndex].votingEnded == false,
-            "PROPOSAL_VOTE_COUNT_ALREADY_STARTED"
-        );
-        _;
-    }
-
-    // Create a modifier which only allows a function to be
-    // called if the given proposals' voting results are available
-    // and if the proposal has not yet been executed
-    modifier readyToExecuteOnly(uint256 proposalIndex) {
-        require(
-            proposals[proposalIndex].votingEnded = true,
-            "VOTING_AGGREGATION_IS_YET_START"
-        );
-        require(
-            proposals[proposalIndex].siblingVoteReceivedCount == siblingCount,
-            "YET_TO_RECEIVE_RESULTS_FROM_ALL_CHAINS"
-        );
-        require(
-            proposals[proposalIndex].executed == false,
-            "PROPOSAL_ALREADY_EXECUTED"
-        );
-        _;
-    }
-
     // Registers it's DAO contracts on other chains as the only ones that can send this instance messages
-    function registerDaoContract(uint16 chainId) public onlyOwner {
-        sideChainId = chainId;
+    function registerDaoContracts(uint16 chainId, bytes32 daoContractAddress) public onlyOwner {
+        mainChainId = chainId;
         _daoContracts[chainId] = daoContractAddress;
-        siblingCount += 1;
     }
 
     // pings the destination chain, along with the current number of pings sent
@@ -148,7 +107,7 @@ contract AnyChainDAO is Ownable, ILayerZeroReceiver {
             msg.value
         );
     }
-
+    
     /// @dev createMessagePayload converts the operation type and proposal state to bytes to emit to the bridge contract
     function createMessagePayload(MessageOperation operation, uint256 proposalIndex)
     internal view returns (bytes memory) {
@@ -157,6 +116,7 @@ contract AnyChainDAO is Ownable, ILayerZeroReceiver {
             proposals[proposalIndex].proposalTitle,
             proposals[proposalIndex].deadline,
             proposals[proposalIndex].votes,
+            proposals[proposalIndex].votingEnded,
             proposals[proposalIndex].executed,
             proposals[proposalIndex].proposalPassed
             );
@@ -174,11 +134,15 @@ contract AnyChainDAO is Ownable, ILayerZeroReceiver {
         bool proposalPassed;
         (operation, proposalIndex, proposalTitle, deadline, votes, executed, proposalPassed) = abi.decode(data, (MessageOperation, uint256, string, uint256, VoteCount, bool, bool));
 
-        if (operation == MessageOperation.SHARING_VOTES) {
-            proposals[proposalIndex].votes.inFavor += votes.inFavor;
-            proposals[proposalIndex].votes.against += votes.against;
-            proposals[proposalIndex].votes.abstain += votes.abstain;
-            proposals[proposalIndex].siblingVoteReceivedCount += 1;
+        if (operation == MessageOperation.NEW_PROPOSAL) {
+            proposals[proposalIndex].proposalTitle = proposalTitle;
+            proposals[proposalIndex].deadline = deadline;
+        } else if (operation == MessageOperation.VOTING_ENDED) {
+            proposals[proposalIndex].votingEnded = true;
+            sendMessage(MessageOperation.SHARING_VOTES, proposalIndex);
+        } else if (operation == MessageOperation.PROPOSAL_RESULT) {
+            proposals[proposalIndex].executed = executed;
+            proposals[proposalIndex].proposalPassed = proposalPassed;
         }
     }
 
@@ -188,24 +152,6 @@ contract AnyChainDAO is Ownable, ILayerZeroReceiver {
             
         //Process the Message
         processMessagePayload(_payload);
-    }
-
-    /// @dev createProposal allows a AnyChainDAO voting rights holder to create a new proposal in the DAO
-    /// @param proposalTitle - The proposal to execute based on voting outcome
-    /// @return Returns the proposal index for the newly created proposal
-    function createProposal(string calldata proposalTitle)
-        external
-        votingRightHolderOnly
-        returns (uint256)
-    {
-        Proposal storage proposal = proposals[numProposals];
-        proposal.proposalTitle = proposalTitle;
-        // Set the proposal's voting deadline to be (current time + 10 minutes)
-        proposal.deadline = block.timestamp + 10 minutes;
-        sendMessage(MessageOperation.NEW_PROPOSAL, numProposals);
-        numProposals++;
-
-        return numProposals - 1;
     }
 
     /// @dev voteOnProposal allows a voting right holder to cast their vote on an active proposal
@@ -228,42 +174,4 @@ contract AnyChainDAO is Ownable, ILayerZeroReceiver {
             proposal.votes.abstain += 1;
         }
     }
-
-    function endVoting(uint256 proposalIndex)
-        external
-        votingRightHolderOnly
-        //modified Needed here to
-    {
-        proposals[proposalIndex].votingEnded = true;
-        sendMessage(MessageOperation.VOTING_ENDED, proposalIndex);
-    }
-
-    /// @dev executeProposal allows any voting right holder to execute a proposal after it's deadline has been exceeded
-    /// @param proposalIndex - the index of the proposal to execute in the proposals array
-    function executeProposal(uint256 proposalIndex)
-        external
-        votingRightHolderOnly
-        readyToExecuteOnly(proposalIndex)
-    {
-        Proposal storage proposal = proposals[proposalIndex];
-
-        // If the proposal has more YES votes than NO votes
-        // mark the outcome has success
-        if (proposal.votes.inFavor > proposal.votes.against) {
-            proposal.proposalPassed = true;
-        }
-        proposal.executed = true;
-        sendMessage(MessageOperation.PROPOSAL_RESULT, proposalIndex);
-    }
-
-    /// @dev withdrawEther allows the contract owner (deployer) to withdraw the ETH from the contract
-    function withdrawEther() external onlyOwner {
-        payable(owner()).transfer(address(this).balance);
-    }
-
-    // The following two functions allow the contract to accept ETH deposits
-    // directly from a wallet without calling a function
-    receive() external payable {}
-
-    fallback() external payable {}
 }
