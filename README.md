@@ -17,6 +17,24 @@ A dapp for governance voting, where one-chain acts as the main chain (allowed to
 - The relayer api is created to only load one side chain currently, though it can be easily modified to have any number of side votign chains
 - As this a POC, voting power in each chain is set to 1 for a user. So the same address can cast vote per chain. In the limited time-frame, intension was to show the concept of cross-chain voting. The actual voting weightage can be integrated similar to Compound and OpenZepplin contracts.
 
+### Screenshots
+<p>
+Home Page
+<img src="images/Home_Page.png">
+</p>
+<p>
+Creating A Proposal
+<img src="images/CreatingProposal.png">
+</p>
+<p>
+Selecting eligible network
+<img src="images/Selecting_Network.png">
+</p>
+<p>
+Interacting With Proposals
+<img src="images/ProposalView.png">
+</p>
+
 ## Challenges
 The project took a lot of thought even to get to the POC stage. Understanding the technology, creating a voting process which is fair, creating a user experience close to single-chain usage.
 
