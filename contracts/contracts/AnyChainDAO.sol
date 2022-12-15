@@ -3,13 +3,11 @@ pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./lzApp/NonblockingLzApp.sol";
-import "./interfaces/ILayerZeroReceiver.sol";
 
-contract AnyChainDAO is Ownable, ILayerZeroReceiver {
+contract AnyChainDAO is Ownable, NonblockingLzApp {
     
     uint32 nonce = 0;
     uint16 sideChainId;
-    mapping(uint16 => bytes32) _daoContracts;
     uint32 siblingCount;
 
     // Create an enum named Vote containing possible options for a vote
@@ -120,31 +118,30 @@ contract AnyChainDAO is Ownable, ILayerZeroReceiver {
     // Registers it's DAO contracts on other chains as the only ones that can send this instance messages
     function registerDaoContract(uint16 chainId) public onlyOwner {
         sideChainId = chainId;
-        _daoContracts[chainId] = daoContractAddress;
         siblingCount += 1;
     }
 
     // pings the destination chain, along with the current number of pings sent
     function sendMessage(
         MessageOperation operation, uint256 proposalIndex
-    ) public payable whenNotPaused {
+    ) public payable {
         require(address(this).balance > 0, "the balance of this contract is 0. pls send gas for message fees");
 
         // encode the payload with the number of pings
         bytes memory payload = createMessagePayload(operation, proposalIndex);
 
         // use adapterParams v1 to specify more gas for the destination
-        uint16 version = 1;
-        uint gasForDestinationLzReceive = 350000;
-        bytes memory adapterParams = abi.encodePacked(version, gasForDestinationLzReceive);
+        // uint16 version = 1;
+        // uint gasForDestinationLzReceive = 350000;
+        // bytes memory adapterParams = abi.encodePacked(version, gasForDestinationLzReceive);
 
         // send LayerZero message
         _lzSend( // {value: messageFee} will be paid out of this contract!
             sideChainId, // destination chainId
             payload, // abi.encode()'ed bytes
-            payable(this), // (msg.sender will be this contract) refund address (LayerZero will refund any extra gas back to caller of send()
+            payable(msg.sender), // (msg.sender will be this contract) refund address (LayerZero will refund any extra gas back to caller of send()
             address(0x0), // future param, unused for this example
-            adapterParams, // v1 adapterParams, specify custom destination gas qty
+            bytes(""), // v1 adapterParams, specify custom destination gas qty
             msg.value
         );
     }
@@ -182,10 +179,7 @@ contract AnyChainDAO is Ownable, ILayerZeroReceiver {
         }
     }
 
-    function lzReceive(uint16 _srcChainId, bytes memory _srcAddress, uint _nonce, bytes memory _payload) internal override {
-        require(msg.sender == address(endpoint));
-        require(keccak256(_srcAddress) == keccak256(_daoContracts[_srcChainId], "Invalid Emitter Address!");
-            
+    function _nonblockingLzReceive(uint16, bytes memory, uint64, bytes memory _payload) internal override {
         //Process the Message
         processMessagePayload(_payload);
     }
